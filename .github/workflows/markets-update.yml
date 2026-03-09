@@ -5,6 +5,27 @@ on:
     # Sunday 3 PM PT = 11 PM UTC (23:00)
     - cron: '0 23 * * 0'
     
+    # Sunday 4 PM PT = 12 AM UTC (00:00 Monday)
+    - cron: '0 0 * * 1'
+    
+    # Sunday 5 PM PT = 1 AM UTC (01:00 Monday)
+    - cron: '0 1 * * 1'
+    
+    # Sunday 6 PM PT = 2 AM UTC (02:00 Monday)
+    - cron: '0 2 * * 1'
+    
+    # Sunday 7 PM PT = 3 AM UTC (03:00 Monday)
+    - cron: '0 3 * * 1'
+    
+    # Sunday 8 PM PT = 4 AM UTC (04:00 Monday)
+    - cron: '0 4 * * 1'
+    
+    # Sunday 9 PM PT = 5 AM UTC (05:00 Monday)
+    - cron: '0 5 * * 1'
+    
+    # Sunday 10 PM PT = 6 AM UTC (06:00 Monday)
+    - cron: '0 6 * * 1'
+    
     # Monday-Friday 6 AM PT = 2 PM UTC (14:00)
     - cron: '0 14 * * 1-5'
     
