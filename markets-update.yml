@@ -1,0 +1,72 @@
+name: Markets Update Notifier
+
+on:
+  schedule:
+    # Sunday 3 PM PT = 11 PM UTC (23:00)
+    - cron: '0 23 * * 0'
+    
+    # Monday-Friday 6 AM PT = 2 PM UTC (14:00)
+    - cron: '0 14 * * 1-5'
+    
+    # Monday-Friday 7 AM PT = 3 PM UTC (15:00)
+    - cron: '0 15 * * 1-5'
+    
+    # Monday-Friday 8 AM PT = 4 PM UTC (16:00)
+    - cron: '0 16 * * 1-5'
+    
+    # Monday-Friday 9 AM PT = 5 PM UTC (17:00)
+    - cron: '0 17 * * 1-5'
+    
+    # Monday-Friday 10 AM PT = 6 PM UTC (18:00)
+    - cron: '0 18 * * 1-5'
+    
+    # Monday-Friday 11 AM PT = 7 PM UTC (19:00)
+    - cron: '0 19 * * 1-5'
+    
+    # Monday-Friday 12 PM PT = 8 PM UTC (20:00)
+    - cron: '0 20 * * 1-5'
+    
+    # Monday-Friday 1 PM PT = 9 PM UTC (21:00)
+    - cron: '0 21 * * 1-5'
+    
+    # Monday-Friday 2 PM PT = 10 PM UTC (22:00)
+    - cron: '0 22 * * 1-5'
+
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  send-markets-update:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install requests yfinance pytz schedule
+    
+    - name: Run markets notifier
+      env:
+        GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      run: |
+        python markets_notifier.py
+    
+    - name: Commit updated baseline (if changed)
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add -A
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update baseline rates"
+    
+    - name: Push changes
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: ${{ github.ref }}
