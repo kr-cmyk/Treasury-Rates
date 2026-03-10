@@ -60,19 +60,19 @@ def get_baseline_comparison_time():
     pt_tz = pytz.timezone('America/Los_Angeles')
     now_pt = datetime.now(pt_tz)
     
-    # Sunday or Monday morning = compare to Friday close
+    # Sunday = compare to Friday close
     if now_pt.weekday() == 6:  # Sunday
         return "vs. Fri 4:30 PM ET"
-    elif now_pt.weekday() == 0 and now_pt.hour < 14:  # Monday before 2 PM PT
+    # Monday 6 AM only = compare to Friday close
+    elif now_pt.weekday() == 0 and now_pt.hour == 6:  # Monday at 6 AM PT
         return "vs. Fri 4:30 PM ET"
-    # Tuesday-Friday morning = compare to previous day 2 PM PT
-    elif now_pt.weekday() >= 1 and now_pt.hour < 14:
-        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-        prev_day = days[now_pt.weekday() - 1]
-        return f"vs. {prev_day} 2:00 PM PT"
-    # During the day = compare to today's open (6 AM PT)
+    # All other times = compare to previous day 2 PM PT
     else:
-        return "vs. Today 6:00 AM PT"
+        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        # Get previous day
+        prev_day_index = (now_pt.weekday() - 1) % 7
+        prev_day = days[prev_day_index]
+        return f"vs. {prev_day} 2:00 PM PT"
 
 
 def load_baseline():
@@ -266,10 +266,15 @@ def calculate_bps_change(current, previous):
 def calculate_pct_change(current, previous):
     """Calculate percentage change"""
     try:
-        if current == 'N/A' or previous == 'N/A':
+        if current == 'N/A' or previous == 'N/A' or current is None or previous is None:
             return ""
-        current_float = float(current)
-        previous_float = float(previous)
+        
+        # Remove commas if present (for stock indices)
+        current_str = str(current).replace(',', '')
+        previous_str = str(previous).replace(',', '')
+        
+        current_float = float(current_str)
+        previous_float = float(previous_str)
         pct_change = ((current_float - previous_float) / previous_float) * 100
         
         if pct_change > 0:
@@ -278,7 +283,8 @@ def calculate_pct_change(current, previous):
             return f" ({pct_change:.2f}%)"
         else:
             return " (unch)"
-    except:
+    except Exception as e:
+        print(f"Error calculating pct change for {current} vs {previous}: {e}")
         return ""
 
 
