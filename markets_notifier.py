@@ -171,7 +171,8 @@ def get_sofr_rate():
             if len(lines) >= 2:
                 last_line = lines[-1].split(',')
                 if len(last_line) >= 2 and last_line[1] not in ['.', '']:
-                    return last_line[1]
+                    rate = float(last_line[1])
+                    return f"{rate:.2f}"  # Round to 2 decimal places
         
         return MANUAL_SOFR_RATE
     except Exception as e:
