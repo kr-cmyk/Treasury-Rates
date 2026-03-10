@@ -53,6 +53,32 @@ def should_update_baseline():
     return False
 
 
+def should_update_mtd_baseline():
+    """
+    Update MTD baseline on the first trading day of each month at 2:00 PM PT
+    """
+    pt_tz = pytz.timezone('America/Los_Angeles')
+    now_pt = datetime.now(pt_tz)
+    
+    # First weekday of the month at 2:00 PM PT
+    if now_pt.day <= 3 and now_pt.weekday() < 5 and now_pt.hour == 14 and now_pt.minute == 0:
+        return True
+    return False
+
+
+def should_update_ytd_baseline():
+    """
+    Update YTD baseline on the first trading day of the year at 2:00 PM PT
+    """
+    pt_tz = pytz.timezone('America/Los_Angeles')
+    now_pt = datetime.now(pt_tz)
+    
+    # First few days of January, weekday, at 2:00 PM PT
+    if now_pt.month == 1 and now_pt.day <= 5 and now_pt.weekday() < 5 and now_pt.hour == 14 and now_pt.minute == 0:
+        return True
+    return False
+
+
 def get_baseline_comparison_time():
     """
     Returns a string describing what time period we're comparing against
@@ -81,18 +107,30 @@ def load_baseline():
         if os.path.exists(BASELINE_FILE):
             with open(BASELINE_FILE, 'r') as f:
                 data = json.load(f)
-                return data.get('rates', None)
-        return None
+                return {
+                    'daily': data.get('rates', None),
+                    'mtd': data.get('mtd_rates', None),
+                    'ytd': data.get('ytd_rates', None)
+                }
+        return {'daily': None, 'mtd': None, 'ytd': None}
     except Exception as e:
         print(f"Error loading baseline: {e}")
-        return None
+        return {'daily': None, 'mtd': None, 'ytd': None}
 
 
-def save_baseline(rates):
+def save_baseline(rates, mtd_rates=None, ytd_rates=None):
     """Save baseline rates to file"""
     try:
+        # Load existing data to preserve MTD/YTD if not updating them
+        existing_data = {}
+        if os.path.exists(BASELINE_FILE):
+            with open(BASELINE_FILE, 'r') as f:
+                existing_data = json.load(f)
+        
         data = {
             'rates': rates,
+            'mtd_rates': mtd_rates if mtd_rates is not None else existing_data.get('mtd_rates'),
+            'ytd_rates': ytd_rates if ytd_rates is not None else existing_data.get('ytd_rates'),
             'timestamp': datetime.now(pytz.timezone('America/Los_Angeles')).isoformat(),
             'note': 'Baseline for market comparisons'
         }
@@ -339,9 +377,9 @@ def main():
     baseline = load_baseline()
     
     # If no baseline exists, create one now
-    if baseline is None:
+    if baseline['daily'] is None:
         print("No baseline found - creating initial baseline...")
-        baseline = {
+        initial_rates = {
             '1Y': yields.get('1Y', 'N/A'),
             '2Y': yields.get('2Y', 'N/A'),
             '3Y': yields.get('3Y', 'N/A'),
@@ -354,71 +392,114 @@ def main():
             'DOW': stocks.get('DOW', 'N/A'),
             'WTI': wti_oil
         }
-        save_baseline(baseline)
+        # Set all baselines to current if none exist
+        save_baseline(initial_rates, mtd_rates=initial_rates, ytd_rates=initial_rates)
+        baseline = load_baseline()
         print("Initial baseline created!")
     
     comparison_note = get_baseline_comparison_time()
     
-    # Calculate changes
-    bps_1y = calculate_bps_change(yields.get('1Y'), baseline.get('1Y') if baseline else None)
-    bps_2y = calculate_bps_change(yields.get('2Y'), baseline.get('2Y') if baseline else None)
-    bps_3y = calculate_bps_change(yields.get('3Y'), baseline.get('3Y') if baseline else None)
-    bps_5y = calculate_bps_change(yields.get('5Y'), baseline.get('5Y') if baseline else None)
-    bps_7y = calculate_bps_change(yields.get('7Y'), baseline.get('7Y') if baseline else None)
-    bps_10y = calculate_bps_change(yields.get('10Y'), baseline.get('10Y') if baseline else None)
-    bps_sofr = calculate_bps_change(sofr, baseline.get('SOFR') if baseline else None)
+    # Calculate daily changes
+    bps_1y = calculate_bps_change(yields.get('1Y'), baseline['daily'].get('1Y') if baseline['daily'] else None)
+    bps_2y = calculate_bps_change(yields.get('2Y'), baseline['daily'].get('2Y') if baseline['daily'] else None)
+    bps_3y = calculate_bps_change(yields.get('3Y'), baseline['daily'].get('3Y') if baseline['daily'] else None)
+    bps_5y = calculate_bps_change(yields.get('5Y'), baseline['daily'].get('5Y') if baseline['daily'] else None)
+    bps_7y = calculate_bps_change(yields.get('7Y'), baseline['daily'].get('7Y') if baseline['daily'] else None)
+    bps_10y = calculate_bps_change(yields.get('10Y'), baseline['daily'].get('10Y') if baseline['daily'] else None)
+    bps_sofr = calculate_bps_change(sofr, baseline['daily'].get('SOFR') if baseline['daily'] else None)
     
-    pct_spx = calculate_pct_change(stocks.get('SPX'), baseline.get('SPX') if baseline else None)
-    pct_nasdaq = calculate_pct_change(stocks.get('NASDAQ'), baseline.get('NASDAQ') if baseline else None)
-    pct_dow = calculate_pct_change(stocks.get('DOW'), baseline.get('DOW') if baseline else None)
-    pct_wti = calculate_pct_change(wti_oil, baseline.get('WTI') if baseline else None)
+    # Calculate MTD changes
+    mtd_1y = calculate_bps_change(yields.get('1Y'), baseline['mtd'].get('1Y') if baseline['mtd'] else None)
+    mtd_2y = calculate_bps_change(yields.get('2Y'), baseline['mtd'].get('2Y') if baseline['mtd'] else None)
+    mtd_3y = calculate_bps_change(yields.get('3Y'), baseline['mtd'].get('3Y') if baseline['mtd'] else None)
+    mtd_5y = calculate_bps_change(yields.get('5Y'), baseline['mtd'].get('5Y') if baseline['mtd'] else None)
+    mtd_7y = calculate_bps_change(yields.get('7Y'), baseline['mtd'].get('7Y') if baseline['mtd'] else None)
+    mtd_10y = calculate_bps_change(yields.get('10Y'), baseline['mtd'].get('10Y') if baseline['mtd'] else None)
+    mtd_sofr = calculate_bps_change(sofr, baseline['mtd'].get('SOFR') if baseline['mtd'] else None)
+    
+    # Calculate YTD changes
+    ytd_1y = calculate_bps_change(yields.get('1Y'), baseline['ytd'].get('1Y') if baseline['ytd'] else None)
+    ytd_2y = calculate_bps_change(yields.get('2Y'), baseline['ytd'].get('2Y') if baseline['ytd'] else None)
+    ytd_3y = calculate_bps_change(yields.get('3Y'), baseline['ytd'].get('3Y') if baseline['ytd'] else None)
+    ytd_5y = calculate_bps_change(yields.get('5Y'), baseline['ytd'].get('5Y') if baseline['ytd'] else None)
+    ytd_7y = calculate_bps_change(yields.get('7Y'), baseline['ytd'].get('7Y') if baseline['ytd'] else None)
+    ytd_10y = calculate_bps_change(yields.get('10Y'), baseline['ytd'].get('10Y') if baseline['ytd'] else None)
+    ytd_sofr = calculate_bps_change(sofr, baseline['ytd'].get('SOFR') if baseline['ytd'] else None)
+    
+    # Stock percentage changes (daily, MTD, YTD)
+    pct_spx = calculate_pct_change(stocks.get('SPX'), baseline['daily'].get('SPX') if baseline['daily'] else None)
+    mtd_pct_spx = calculate_pct_change(stocks.get('SPX'), baseline['mtd'].get('SPX') if baseline['mtd'] else None)
+    ytd_pct_spx = calculate_pct_change(stocks.get('SPX'), baseline['ytd'].get('SPX') if baseline['ytd'] else None)
+    
+    pct_nasdaq = calculate_pct_change(stocks.get('NASDAQ'), baseline['daily'].get('NASDAQ') if baseline['daily'] else None)
+    mtd_pct_nasdaq = calculate_pct_change(stocks.get('NASDAQ'), baseline['mtd'].get('NASDAQ') if baseline['mtd'] else None)
+    ytd_pct_nasdaq = calculate_pct_change(stocks.get('NASDAQ'), baseline['ytd'].get('NASDAQ') if baseline['ytd'] else None)
+    
+    pct_dow = calculate_pct_change(stocks.get('DOW'), baseline['daily'].get('DOW') if baseline['daily'] else None)
+    mtd_pct_dow = calculate_pct_change(stocks.get('DOW'), baseline['mtd'].get('DOW') if baseline['mtd'] else None)
+    ytd_pct_dow = calculate_pct_change(stocks.get('DOW'), baseline['ytd'].get('DOW') if baseline['ytd'] else None)
+    
+    # WTI Oil percentage changes (daily, MTD, YTD)
+    pct_wti = calculate_pct_change(wti_oil, baseline['daily'].get('WTI') if baseline['daily'] else None)
+    mtd_pct_wti = calculate_pct_change(wti_oil, baseline['mtd'].get('WTI') if baseline['mtd'] else None)
+    ytd_pct_wti = calculate_pct_change(wti_oil, baseline['ytd'].get('WTI') if baseline['ytd'] else None)
     
     # Build email
     subject = f"Markets Update - {now_pt.strftime('%I:%M %p PT')}"
     
-    body = f"TREASURIES:\n"
-    body += f"1Y:  {yields.get('1Y', 'N/A')}%{bps_1y}\n"
-    body += f"2Y:  {yields.get('2Y', 'N/A')}%{bps_2y}\n"
-    body += f"3Y:  {yields.get('3Y', 'N/A')}%{bps_3y}\n"
-    body += f"5Y:  {yields.get('5Y', 'N/A')}%{bps_5y}\n"
-    body += f"7Y:  {yields.get('7Y', 'N/A')}%{bps_7y}\n"
-    body += f"10Y: {yields.get('10Y', 'N/A')}%{bps_10y}\n\n"
+    body = f"TREASURIES:          DAILY    MTD      YTD\n"
+    body += f"1Y:  {yields.get('1Y', 'N/A')}%{bps_1y}{mtd_1y}{ytd_1y}\n"
+    body += f"2Y:  {yields.get('2Y', 'N/A')}%{bps_2y}{mtd_2y}{ytd_2y}\n"
+    body += f"3Y:  {yields.get('3Y', 'N/A')}%{bps_3y}{mtd_3y}{ytd_3y}\n"
+    body += f"5Y:  {yields.get('5Y', 'N/A')}%{bps_5y}{mtd_5y}{ytd_5y}\n"
+    body += f"7Y:  {yields.get('7Y', 'N/A')}%{bps_7y}{mtd_7y}{ytd_7y}\n"
+    body += f"10Y: {yields.get('10Y', 'N/A')}%{bps_10y}{mtd_10y}{ytd_10y}\n\n"
     
-    body += f"SOFR:\n"
-    body += f"1M: {sofr}%{bps_sofr}\n\n"
+    body += f"SOFR:                DAILY    MTD      YTD\n"
+    body += f"1M: {sofr}%{bps_sofr}{mtd_sofr}{ytd_sofr}\n\n"
     
-    body += f"STOCKS:\n"
-    body += f"S&P:    {stocks.get('SPX', 'N/A')}{pct_spx}\n"
-    body += f"Nasdaq: {stocks.get('NASDAQ', 'N/A')}{pct_nasdaq}\n"
-    body += f"Dow:    {stocks.get('DOW', 'N/A')}{pct_dow}\n\n"
+    body += f"STOCKS:              DAILY    MTD      YTD\n"
+    body += f"S&P:    {stocks.get('SPX', 'N/A')}{pct_spx}{mtd_pct_spx}{ytd_pct_spx}\n"
+    body += f"Nasdaq: {stocks.get('NASDAQ', 'N/A')}{pct_nasdaq}{mtd_pct_nasdaq}{ytd_pct_nasdaq}\n"
+    body += f"Dow:    {stocks.get('DOW', 'N/A')}{pct_dow}{mtd_pct_dow}{ytd_pct_dow}\n\n"
     
-    body += f"COMMODITIES:\n"
-    body += f"WTI Oil: ${wti_oil}{pct_wti}\n\n"
+    body += f"COMMODITIES:         DAILY    MTD      YTD\n"
+    body += f"WTI Oil: ${wti_oil}{pct_wti}{mtd_pct_wti}{ytd_pct_wti}\n\n"
     
     body += f"{now_pt.strftime('%I:%M %p PT - %b %d, %Y')}\n"
-    if baseline:
+    if baseline['daily']:
         body += f"{comparison_note}"
     
     # Send email
     send_email(subject, body)
     
     # Update baseline if needed
-    if should_update_baseline():
-        print("Updating baseline...")
-        current_rates = {
-            '1Y': yields.get('1Y', 'N/A'),
-            '2Y': yields.get('2Y', 'N/A'),
-            '3Y': yields.get('3Y', 'N/A'),
-            '5Y': yields.get('5Y', 'N/A'),
-            '7Y': yields.get('7Y', 'N/A'),
-            '10Y': yields.get('10Y', 'N/A'),
-            'SOFR': sofr,
-            'SPX': stocks.get('SPX', 'N/A'),
-            'NASDAQ': stocks.get('NASDAQ', 'N/A'),
-            'DOW': stocks.get('DOW', 'N/A'),
-            'WTI': wti_oil
-        }
-        save_baseline(current_rates)
+    current_rates = {
+        '1Y': yields.get('1Y', 'N/A'),
+        '2Y': yields.get('2Y', 'N/A'),
+        '3Y': yields.get('3Y', 'N/A'),
+        '5Y': yields.get('5Y', 'N/A'),
+        '7Y': yields.get('7Y', 'N/A'),
+        '10Y': yields.get('10Y', 'N/A'),
+        'SOFR': sofr,
+        'SPX': stocks.get('SPX', 'N/A'),
+        'NASDAQ': stocks.get('NASDAQ', 'N/A'),
+        'DOW': stocks.get('DOW', 'N/A'),
+        'WTI': wti_oil
+    }
+    
+    # Check if we need to update any baselines
+    update_daily = should_update_baseline()
+    update_mtd = should_update_mtd_baseline()
+    update_ytd = should_update_ytd_baseline()
+    
+    if update_daily or update_mtd or update_ytd:
+        print(f"Updating baselines - Daily: {update_daily}, MTD: {update_mtd}, YTD: {update_ytd}")
+        save_baseline(
+            current_rates if update_daily else baseline['daily'],
+            mtd_rates=current_rates if update_mtd else baseline['mtd'],
+            ytd_rates=current_rates if update_ytd else baseline['ytd']
+        )
     
     print("✅ Complete!")
 
