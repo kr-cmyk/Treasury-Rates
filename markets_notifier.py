@@ -162,48 +162,31 @@ def save_baseline(rates):
 # ============================================
 
 def get_treasury_yields():
-    """Fetch Treasury yields from CNBC."""
+    """Fetch Treasury yields from Treasury.gov XML feed."""
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-
+        pt_tz = pytz.timezone("America/Los_Angeles")
+        yr = datetime.now(pt_tz).year
+        url = (
+            "https://home.treasury.gov/resource-center/data-chart-center/"
+            "interest-rates/pages/xml?data=daily_treasury_yield_curve"
+            f"&field_tdr_date_value={yr}"
+        )
+        response = requests.get(url, timeout=30)
         yields = {}
-        cnbc_urls = {
-            "1Y": "https://www.cnbc.com/quotes/US1Y",
-            "2Y": "https://www.cnbc.com/quotes/US2Y",
-            "3Y": "https://www.cnbc.com/quotes/US3Y",
-            "5Y": "https://www.cnbc.com/quotes/US5Y",
-            "7Y": "https://www.cnbc.com/quotes/US7Y",
-            "10Y": "https://www.cnbc.com/quotes/US10Y",
-        }
-
-        for tenor, url in cnbc_urls.items():
-            try:
-                response = requests.get(url, headers=headers, timeout=10)
-                if response.status_code == 200:
-                    text = response.text
-                    patterns = [
-                        r'"last":"(\d+\.\d+)"',
-                        r'data-symbol-last[^>]*>(\d+\.\d+)',
-                        r'class="QuoteStrip-lastPrice">(\d+\.\d+)',
-                    ]
-                    for pattern in patterns:
-                        match = re.search(pattern, text)
-                        if match:
-                            rate = match.group(1)
-                            rate_float = float(rate)
-                            if 0 < rate_float < 10:
-                                yields[tenor] = f"{rate_float:.2f}"
-                                break
-                            elif 10 < rate_float < 100:
-                                yields[tenor] = f"{rate_float / 10:.2f}"
-                                break
-            except Exception as e:
-                print(f"Error fetching {tenor}: {e}")
-                yields[tenor] = "N/A"
-
-        return yields if yields else {t: "N/A" for t in cnbc_urls}
+        if response.status_code == 200:
+            field_map = {
+                "1Y": "BC_1YEAR", "2Y": "BC_2YEAR", "3Y": "BC_3YEAR",
+                "5Y": "BC_5YEAR", "7Y": "BC_7YEAR", "10Y": "BC_10YEAR",
+            }
+            entries = response.text.split("<entry>")
+            if len(entries) > 1:
+                last_entry = entries[-1]
+                for tenor, tag in field_map.items():
+                    m = re.search(rf"d:{tag}[^>]*>(\d+\.?\d*)</d:{tag}", last_entry)
+                    if m:
+                        yields[tenor] = f"{float(m.group(1)):.2f}"
+        print(f"Treasury yields: {yields}")
+        return yields if yields else {t: "N/A" for t in ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"]}
 
     except Exception as e:
         print(f"Treasury fetch error: {e}")
