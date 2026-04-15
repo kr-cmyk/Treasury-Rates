@@ -88,17 +88,14 @@ def send_message(content):
 def should_update_baseline():
     """
     Determine if we should update the baseline.
-    Updates at: Friday 4:30 PM ET, and Mon-Fri at 2:00 PM PT.
+    Updates at the 2 PM PT run (last run of each trading day).
+    GitHub Actions cron can be delayed, so check hour >= 14.
     """
     pt_tz = pytz.timezone("America/Los_Angeles")
-    et_tz = pytz.timezone("America/New_York")
     now_pt = datetime.now(pt_tz)
-    now_et = datetime.now(et_tz)
 
-    if now_et.weekday() == 4 and now_et.hour >= 16 and now_et.minute >= 30:
-        return True
-
-    if now_pt.weekday() < 5 and now_pt.hour == 14 and now_pt.minute == 0:
+    # Weekday at 2 PM PT or later (the last hourly run of the day)
+    if now_pt.weekday() < 5 and now_pt.hour >= 14:
         return True
 
     return False
@@ -162,60 +159,32 @@ def save_baseline(rates):
 # ============================================
 
 def get_treasury_yields():
-    """Fetch live Treasury yields from CNBC, fallback to Treasury.gov XML."""
+    """Fetch Treasury yields from Treasury.gov XML feed (official source)."""
     yields = {}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
 
-    # Primary: CNBC (live intraday rates)
     try:
-        for tenor in ("1Y", "2Y", "3Y", "5Y", "7Y", "10Y"):
-            try:
-                url = f"https://www.cnbc.com/quotes/US{tenor}"
-                response = requests.get(url, headers=headers, timeout=10)
-                if response.status_code == 200:
-                    for pattern in (r'"last":"(\d+\.\d+)"', r'data-symbol-last[^>]*>(\d+\.\d+)'):
-                        match = re.search(pattern, response.text)
-                        if match:
-                            rate_float = float(match.group(1))
-                            if 0 < rate_float < 10:
-                                yields[tenor] = f"{rate_float:.2f}"
-                            elif 10 < rate_float < 100:
-                                yields[tenor] = f"{rate_float / 10:.2f}"
-                            break
-            except Exception as e:
-                print(f"CNBC {tenor}: {e}")
+        pt_tz = pytz.timezone("America/Los_Angeles")
+        yr = datetime.now(pt_tz).year
+        treas_url = (
+            "https://home.treasury.gov/resource-center/data-chart-center/"
+            "interest-rates/pages/xml?data=daily_treasury_yield_curve"
+            f"&field_tdr_date_value={yr}"
+        )
+        response = requests.get(treas_url, timeout=30)
+        if response.status_code == 200:
+            field_map = {
+                "1Y": "BC_1YEAR", "2Y": "BC_2YEAR", "3Y": "BC_3YEAR",
+                "5Y": "BC_5YEAR", "7Y": "BC_7YEAR", "10Y": "BC_10YEAR",
+            }
+            entries = response.text.split("<entry>")
+            if len(entries) > 1:
+                last_entry = entries[-1]
+                for tenor, tag in field_map.items():
+                    m = re.search(rf"d:{tag}[^>]*>(\d+\.?\d*)</d:{tag}", last_entry)
+                    if m:
+                        yields[tenor] = f"{float(m.group(1)):.2f}"
     except Exception as e:
-        print(f"CNBC fetch error: {e}")
-
-    # If CNBC failed, fallback to Treasury.gov (daily close only)
-    if len(yields) < 3:
-        print("CNBC failed, falling back to Treasury.gov XML...")
-        try:
-            pt_tz = pytz.timezone("America/Los_Angeles")
-            yr = datetime.now(pt_tz).year
-            treas_url = (
-                "https://home.treasury.gov/resource-center/data-chart-center/"
-                "interest-rates/pages/xml?data=daily_treasury_yield_curve"
-                f"&field_tdr_date_value={yr}"
-            )
-            response = requests.get(treas_url, timeout=30)
-            if response.status_code == 200:
-                field_map = {
-                    "1Y": "BC_1YEAR", "2Y": "BC_2YEAR", "3Y": "BC_3YEAR",
-                    "5Y": "BC_5YEAR", "7Y": "BC_7YEAR", "10Y": "BC_10YEAR",
-                }
-                entries = response.text.split("<entry>")
-                if len(entries) > 1:
-                    last_entry = entries[-1]
-                    for tenor, tag in field_map.items():
-                        if tenor not in yields:
-                            m = re.search(rf"d:{tag}[^>]*>(\d+\.?\d*)</d:{tag}", last_entry)
-                            if m:
-                                yields[tenor] = f"{float(m.group(1)):.2f}"
-        except Exception as e:
-            print(f"Treasury.gov fallback error: {e}")
+        print(f"Treasury.gov fetch error: {e}")
 
     for t in ("1Y", "2Y", "3Y", "5Y", "7Y", "10Y"):
         yields.setdefault(t, "N/A")
