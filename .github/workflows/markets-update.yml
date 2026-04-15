@@ -2,90 +2,65 @@ name: Markets Update Notifier
 
 on:
   schedule:
-    # Sunday 3 PM PT = 11 PM UTC (23:00)
-    - cron: '0 23 * * 0'
-    
-    # Sunday 4 PM PT = 12 AM UTC (00:00 Monday)
-    - cron: '0 0 * * 1'
-    
-    # Sunday 5 PM PT = 1 AM UTC (01:00 Monday)
-    - cron: '0 1 * * 1'
-    
-    # Sunday 6 PM PT = 2 AM UTC (02:00 Monday)
-    - cron: '0 2 * * 1'
-    
-    # Sunday 7 PM PT = 3 AM UTC (03:00 Monday)
-    - cron: '0 3 * * 1'
-    
-    # Sunday 8 PM PT = 4 AM UTC (04:00 Monday)
-    - cron: '0 4 * * 1'
-    
-    # Sunday 9 PM PT = 5 AM UTC (05:00 Monday)
-    - cron: '0 5 * * 1'
-    
-    # Sunday 10 PM PT = 6 AM UTC (06:00 Monday)
-    - cron: '0 6 * * 1'
-    
-    # Monday-Friday 6 AM PT = 2 PM UTC (14:00)
+    # Monday-Friday 7 AM PT = 2 PM UTC (14:00)
     - cron: '0 14 * * 1-5'
-    
-    # Monday-Friday 7 AM PT = 3 PM UTC (15:00)
+
+    # Monday-Friday 8 AM PT = 3 PM UTC (15:00)
     - cron: '0 15 * * 1-5'
-    
-    # Monday-Friday 8 AM PT = 4 PM UTC (16:00)
+
+    # Monday-Friday 9 AM PT = 4 PM UTC (16:00)
     - cron: '0 16 * * 1-5'
-    
-    # Monday-Friday 9 AM PT = 5 PM UTC (17:00)
+
+    # Monday-Friday 10 AM PT = 5 PM UTC (17:00)
     - cron: '0 17 * * 1-5'
-    
-    # Monday-Friday 10 AM PT = 6 PM UTC (18:00)
+
+    # Monday-Friday 11 AM PT = 6 PM UTC (18:00)
     - cron: '0 18 * * 1-5'
-    
-    # Monday-Friday 11 AM PT = 7 PM UTC (19:00)
+
+    # Monday-Friday 12 PM PT = 7 PM UTC (19:00)
     - cron: '0 19 * * 1-5'
-    
-    # Monday-Friday 12 PM PT = 8 PM UTC (20:00)
+
+    # Monday-Friday 1 PM PT = 8 PM UTC (20:00)
     - cron: '0 20 * * 1-5'
-    
-    # Monday-Friday 1 PM PT = 9 PM UTC (21:00)
+
+    # Monday-Friday 2 PM PT = 9 PM UTC (21:00)
     - cron: '0 21 * * 1-5'
-    
-    # Monday-Friday 2 PM PT = 10 PM UTC (22:00)
-    - cron: '0 22 * * 1-5'
 
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
   send-markets-update:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: |
-        pip install requests yfinance pytz schedule
-    
+        pip install requests yfinance pytz python-dotenv
+
     - name: Run markets notifier
       env:
-        GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
-        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        SENDBLUE_API_KEY: ${{ secrets.SENDBLUE_API_KEY }}
+        SENDBLUE_API_SECRET: ${{ secrets.SENDBLUE_API_SECRET }}
+        SENDBLUE_FROM_NUMBER: ${{ secrets.SENDBLUE_FROM_NUMBER }}
+        RECIPIENT_NUMBER: ${{ secrets.RECIPIENT_NUMBER }}
       run: |
         python markets_notifier.py
-    
+
     - name: Commit updated baseline (if changed)
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add -A
         git diff --quiet && git diff --staged --quiet || git commit -m "Update baseline rates"
-    
+
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
