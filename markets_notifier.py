@@ -15,7 +15,7 @@ import json
 import re
 import argparse
 import requests
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 try:
@@ -136,15 +136,42 @@ def load_baseline():
 
 
 def save_baseline(rates):
-    """Save daily baseline rates to file, preserving mtd/ytd."""
+    """Save daily baseline; auto-promote prior daily to MTD/YTD on month/year transitions.
+
+    The 2 PM PT save on the last trading day of a month captures that month's
+    closing rates. The next save, after a month transition, sees a previous
+    timestamp from the prior month — at that moment the still-stored daily
+    baseline is exactly what next-month's MTD should compare against.
+    """
     try:
         data = {}
+        prev_rates = None
+        prev_ts = None
         if os.path.exists(BASELINE_FILE):
             with open(BASELINE_FILE, "r") as f:
                 data = json.load(f)
+            prev_rates = data.get("rates")
+            ts_str = data.get("timestamp")
+            if ts_str:
+                try:
+                    prev_ts = datetime.fromisoformat(ts_str)
+                except Exception:
+                    prev_ts = None
+
+        now_pt = datetime.now(pytz.timezone("America/Los_Angeles"))
+
+        if prev_rates and prev_ts and (prev_ts.year, prev_ts.month) != (now_pt.year, now_pt.month):
+            data["mtd_rates"] = prev_rates
+            data["mtd_baseline_date"] = prev_ts.date().isoformat()
+            print(f"Month boundary: promoted previous daily ({prev_ts.date()}) to MTD baseline")
+
+        if prev_rates and prev_ts and prev_ts.year != now_pt.year:
+            data["ytd_rates"] = prev_rates
+            data["ytd_baseline_date"] = prev_ts.date().isoformat()
+            print(f"Year boundary: promoted previous daily ({prev_ts.date()}) to YTD baseline")
 
         data["rates"] = rates
-        data["timestamp"] = datetime.now(pytz.timezone("America/Los_Angeles")).isoformat()
+        data["timestamp"] = now_pt.isoformat()
         data["note"] = "Baseline for market comparisons"
 
         with open(BASELINE_FILE, "w") as f:
@@ -292,6 +319,158 @@ def get_wti_price():
     except Exception as e:
         print(f"WTI fetch error: {e}")
         return "N/A"
+
+
+# ============================================
+# HISTORICAL FETCH (for --reseed-baselines)
+# ============================================
+
+def _weekday_on_or_before(d):
+    """Walk back to the nearest weekday (Mon-Fri). Holidays handled by data
+    fallbacks (yfinance/Treasury return the most recent prior trading day)."""
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _yf_close_on(ticker, target_date):
+    """Closing price for `ticker` on `target_date` (or nearest prior trading day)."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        start = (target_date - timedelta(days=10)).isoformat()
+        end = (target_date + timedelta(days=1)).isoformat()
+        hist = t.history(start=start, end=end)
+        if hist is None or hist.empty:
+            return None
+        return f"{float(hist['Close'].iloc[-1]):.2f}"
+    except Exception as e:
+        print(f"Historical {ticker} on {target_date}: {e}")
+        return None
+
+
+def _treasury_yields_on(target_date):
+    """Treasury yields from Treasury.gov XML for `target_date` (or nearest prior)."""
+    yields = {}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    url = (
+        "https://home.treasury.gov/resource-center/data-chart-center/"
+        "interest-rates/pages/xml?data=daily_treasury_yield_curve"
+        f"&field_tdr_date_value={target_date.year}"
+    )
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code != 200:
+            print(f"Treasury.gov returned {response.status_code} for {target_date.year}")
+            return yields
+        field_map = {
+            "1Y": "BC_1YEAR", "2Y": "BC_2YEAR", "3Y": "BC_3YEAR",
+            "5Y": "BC_5YEAR", "7Y": "BC_7YEAR", "10Y": "BC_10YEAR",
+        }
+        best_entry = None
+        best_date = None
+        for entry in response.text.split("<entry>")[1:]:
+            m = re.search(r"d:NEW_DATE[^>]*>(\d{4}-\d{2}-\d{2})", entry)
+            if not m:
+                continue
+            entry_date = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+            if entry_date <= target_date and (best_date is None or entry_date > best_date):
+                best_date = entry_date
+                best_entry = entry
+        if best_entry is None:
+            print(f"No Treasury entry on/before {target_date}")
+            return yields
+        print(f"Treasury yields from {best_date} (target {target_date})")
+        for tenor, tag in field_map.items():
+            m = re.search(rf"d:{tag}[^>]*>(\d+\.?\d*)</d:{tag}", best_entry)
+            if m:
+                yields[tenor] = f"{float(m.group(1)):.2f}"
+    except Exception as e:
+        print(f"Treasury historical fetch error: {e}")
+    return yields
+
+
+def _sofr_on(target_date):
+    """SOFR from FRED on `target_date` (or nearest prior published value)."""
+    try:
+        url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR30DAYAVG"
+        response = requests.get(url, timeout=15)
+        if response.status_code != 200:
+            return None
+        best = None
+        for line in response.text.strip().split("\n")[1:]:
+            parts = line.split(",")
+            if len(parts) < 2 or parts[1] in (".", ""):
+                continue
+            try:
+                d = datetime.strptime(parts[0], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if d <= target_date and (best is None or d > best[0]):
+                best = (d, parts[1])
+        if best is None:
+            return None
+        print(f"SOFR from {best[0]} (target {target_date})")
+        return f"{float(best[1]):.2f}"
+    except Exception as e:
+        print(f"SOFR historical fetch error: {e}")
+        return None
+
+
+def fetch_historical_baseline(target_date, label=""):
+    """Full baseline snapshot for `target_date`, used by reseed_baselines()."""
+    print(f"Fetching {label} baseline for {target_date}...")
+    yields = _treasury_yields_on(target_date)
+    sofr = _sofr_on(target_date) or MANUAL_SOFR_RATE
+    spx = _yf_close_on("^GSPC", target_date) or "N/A"
+    nasdaq = _yf_close_on("^IXIC", target_date) or "N/A"
+    dow = _yf_close_on("^DJI", target_date) or "N/A"
+    wti = _yf_close_on("CL=F", target_date) or "N/A"
+    return {
+        "1Y": yields.get("1Y", "N/A"),
+        "2Y": yields.get("2Y", "N/A"),
+        "3Y": yields.get("3Y", "N/A"),
+        "5Y": yields.get("5Y", "N/A"),
+        "7Y": yields.get("7Y", "N/A"),
+        "10Y": yields.get("10Y", "N/A"),
+        "SOFR": sofr,
+        "SPX": spx,
+        "NASDAQ": nasdaq,
+        "DOW": dow,
+        "WTI": wti,
+    }
+
+
+def reseed_baselines():
+    """Backfill mtd_rates and ytd_rates in baseline_rates.json from historical data.
+
+    MTD anchor: last weekday of the previous calendar month.
+    YTD anchor: last weekday of the previous calendar year.
+    """
+    pt_tz = pytz.timezone("America/Los_Angeles")
+    today = datetime.now(pt_tz).date()
+
+    end_of_prev_month = _weekday_on_or_before(today.replace(day=1) - timedelta(days=1))
+    end_of_prev_year = _weekday_on_or_before(date(today.year - 1, 12, 31))
+
+    mtd = fetch_historical_baseline(end_of_prev_month, label=f"MTD ({end_of_prev_month})")
+    ytd = fetch_historical_baseline(end_of_prev_year, label=f"YTD ({end_of_prev_year})")
+
+    data = {}
+    if os.path.exists(BASELINE_FILE):
+        with open(BASELINE_FILE, "r") as f:
+            data = json.load(f)
+
+    data["mtd_rates"] = mtd
+    data["mtd_baseline_date"] = end_of_prev_month.isoformat()
+    data["ytd_rates"] = ytd
+    data["ytd_baseline_date"] = end_of_prev_year.isoformat()
+
+    with open(BASELINE_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"\nReseeded MTD ({end_of_prev_month}): {mtd}")
+    print(f"Reseeded YTD ({end_of_prev_year}): {ytd}")
 
 
 # ============================================
@@ -453,5 +632,9 @@ def run_update(on_demand=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Markets Update Notifier")
     parser.add_argument("--on-demand", action="store_true", help="Send immediate update without baseline changes")
+    parser.add_argument("--reseed-baselines", action="store_true", help="Backfill mtd_rates/ytd_rates from historical data and exit")
     args = parser.parse_args()
-    run_update(on_demand=args.on_demand)
+    if args.reseed_baselines:
+        reseed_baselines()
+    else:
+        run_update(on_demand=args.on_demand)
