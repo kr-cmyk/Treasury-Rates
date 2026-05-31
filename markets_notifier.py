@@ -321,6 +321,64 @@ def get_wti_price():
         return "N/A"
 
 
+def get_stock_futures():
+    """Scrape CNBC front-month E-mini index futures.
+
+    Used outside cash equity hours (Sunday night, weekday pre/post market)
+    so the Daily column reflects the futures-implied move rather than
+    Friday's stale 4 PM ET cash close. Mirrors the CNBC scraping pattern
+    from get_treasury_yields().
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    # CNBC front-month e-mini futures symbols.
+    symbols = {"SPX": "@SP.1", "NASDAQ": "@ND.1", "DOW": "@DJ.1"}
+    # Patterns ordered most-specific first; numbers may include thousands commas.
+    patterns = [
+        r'class="QuoteStrip-lastPrice">([\d,]+\.\d+)',
+        r'data-symbol-last[^>]*>([\d,]+\.\d+)',
+        r'"last":"([\d,]+\.\d+)"',
+    ]
+    results = {}
+    for name, symbol in symbols.items():
+        try:
+            url = f"https://www.cnbc.com/quotes/{symbol}"
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                for pattern in patterns:
+                    match = re.search(pattern, response.text)
+                    if match:
+                        raw = match.group(1).replace(",", "")
+                        try:
+                            val = float(raw)
+                        except ValueError:
+                            continue
+                        # Index futures sit between ~1000 and ~100000; anything
+                        # outside that range is some other field on the page.
+                        if 1000 <= val < 100000:
+                            results[name] = f"{val:.2f}"
+                            break
+        except Exception as e:
+            print(f"CNBC futures {symbol}: {e}")
+        results.setdefault(name, "N/A")
+    print(f"Stock futures (CNBC): {results}")
+    return results
+
+
+def is_cash_equity_market_open(now_pt):
+    """True iff US cash equity market is in regular trading hours (9:30 AM - 4 PM ET).
+
+    Holidays not handled; on a holiday this will say "open" and the cash
+    indices stay at the prior close — same behavior as before this change.
+    """
+    if now_pt.weekday() >= 5:
+        return False
+    et = now_pt.astimezone(pytz.timezone("America/New_York"))
+    minutes = et.hour * 60 + et.minute
+    return 9 * 60 + 30 <= minutes < 16 * 60
+
+
 # ============================================
 # HISTORICAL FETCH (for --reseed-baselines)
 # ============================================
@@ -529,8 +587,22 @@ def run_update(on_demand=False):
     print("Fetching market data...")
     yields = get_treasury_yields()
     sofr = get_sofr_rate()
-    stocks = get_stock_indices()
+    stocks = get_stock_indices()  # cash; canonical for baseline saves
     wti = get_wti_price()
+
+    # Outside cash equity hours, swap in CNBC futures for the displayed
+    # stock values so the Daily column shows the overnight/weekend move.
+    # `stocks` (cash) is still what gets written to the baseline at 2 PM PT.
+    stocks_display = stocks
+    stocks_label = "STOCKS:"
+    if not is_cash_equity_market_open(now_pt):
+        print("Cash equity market closed - fetching CNBC futures for display")
+        futures = get_stock_futures()
+        stocks_display = {}
+        for k in ("SPX", "NASDAQ", "DOW"):
+            fv = futures.get(k)
+            stocks_display[k] = fv if fv and fv != "N/A" else stocks.get(k, "N/A")
+        stocks_label = "STOCKS (futures):"
 
     # Load baselines
     baselines = load_baseline()
@@ -595,10 +667,10 @@ def run_update(on_demand=False):
     msg += f"SOFR:\n{hdr}\n"
     msg += bps_row("1M: ", "SOFR", sofr) + "\n\n"
 
-    msg += f"STOCKS:\n{hdr}\n"
-    msg += pct_block("S&P:", "SPX", stocks.get("SPX", "N/A"), whole=True) + "\n"
-    msg += pct_block("Nasdaq:", "NASDAQ", stocks.get("NASDAQ", "N/A"), whole=True) + "\n"
-    msg += pct_block("Dow:", "DOW", stocks.get("DOW", "N/A"), whole=True) + "\n\n"
+    msg += f"{stocks_label}\n{hdr}\n"
+    msg += pct_block("S&P:", "SPX", stocks_display.get("SPX", "N/A"), whole=True) + "\n"
+    msg += pct_block("Nasdaq:", "NASDAQ", stocks_display.get("NASDAQ", "N/A"), whole=True) + "\n"
+    msg += pct_block("Dow:", "DOW", stocks_display.get("DOW", "N/A"), whole=True) + "\n\n"
 
     msg += f"COMMODITIES:\n{hdr}\n"
     msg += pct_block("WTI:", "WTI", wti) + "\n\n"
