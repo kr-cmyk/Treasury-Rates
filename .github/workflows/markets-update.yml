@@ -27,6 +27,11 @@ on:
     - cron: '0 21 * * 1-5'
 
   workflow_dispatch:  # Allows manual triggering
+    inputs:
+      reseed_baselines:
+        description: 'One-shot: rewrite mtd_rates/ytd_rates from historical data (no message sent)'
+        type: boolean
+        default: false
 
 jobs:
   send-markets-update:
@@ -52,7 +57,11 @@ jobs:
         SENDBLUE_FROM_NUMBER: ${{ secrets.SENDBLUE_FROM_NUMBER }}
         RECIPIENT_NUMBER: ${{ secrets.RECIPIENT_NUMBER }}
       run: |
-        python markets_notifier.py
+        if [[ "${{ inputs.reseed_baselines }}" == "true" ]]; then
+          python markets_notifier.py --reseed-baselines
+        else
+          python markets_notifier.py
+        fi
 
     - name: Commit updated baseline (if changed)
       run: |
