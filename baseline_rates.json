@@ -10,7 +10,7 @@
     "SPX": "7599.96",
     "NASDAQ": "27086.81",
     "DOW": "51078.88",
-    "WTI": "92.45"
+    "WTI": "92.26"
   },
   "mtd_rates": {
     "1Y": "3.78",
@@ -38,7 +38,7 @@
     "DOW": "48063.29",
     "WTI": "57.42"
   },
-  "timestamp": "2026-06-01T15:10:15.438068-07:00",
+  "timestamp": "2026-06-01T15:33:40.327584-07:00",
   "note": "Baseline for market comparisons",
   "mtd_baseline_date": "2026-05-29",
   "ytd_baseline_date": "2025-12-31"
