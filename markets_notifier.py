@@ -333,7 +333,7 @@ def get_stock_futures():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     # CNBC front-month e-mini futures symbols.
-    symbols = {"SPX": "@SP.1", "NASDAQ": "@ND.1", "DOW": "@DJ.1"}
+    symbols = {"SPX": "@SP.1", "NASDAQ": "@NQ.1", "DOW": "@DJ.1"}
     # Patterns ordered most-specific first; numbers may include thousands commas.
     patterns = [
         r'class="QuoteStrip-lastPrice">([\d,]+\.\d+)',
@@ -601,7 +601,20 @@ def run_update(on_demand=False):
         stocks_display = {}
         for k in ("SPX", "NASDAQ", "DOW"):
             fv = futures.get(k)
-            stocks_display[k] = fv if fv and fv != "N/A" else stocks.get(k, "N/A")
+            cv = stocks.get(k)
+            chosen = fv if fv and fv != "N/A" else cv
+            # Defense in depth: if CNBC handed us something more than 5% away
+            # from the cash close, the scraper grabbed the wrong field (or the
+            # symbol is for a dead contract). Fall back to cash rather than
+            # display an obviously bogus number.
+            try:
+                if chosen and chosen != "N/A" and cv and cv != "N/A":
+                    if abs(float(chosen) - float(cv)) / float(cv) > 0.05:
+                        print(f"Futures {k}={chosen} >5% from cash {cv}; using cash")
+                        chosen = cv
+            except Exception:
+                pass
+            stocks_display[k] = chosen if chosen else "N/A"
         stocks_label = "STOCKS (futures):"
 
     # Load baselines
