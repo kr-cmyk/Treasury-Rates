@@ -1,32 +1,11 @@
 name: Markets Update Notifier
 
+# Triggered exclusively via workflow_dispatch — cron-job.org calls the
+# dispatch endpoint on schedule (handles DST automatically). No GitHub
+# Actions cron entries, since GHA scheduled runs were delivering 30-180
+# minutes late.
 on:
-  schedule:
-    # Monday-Friday 7 AM PT = 2 PM UTC (14:00)
-    - cron: '0 14 * * 1-5'
-
-    # Monday-Friday 8 AM PT = 3 PM UTC (15:00)
-    - cron: '0 15 * * 1-5'
-
-    # Monday-Friday 9 AM PT = 4 PM UTC (16:00)
-    - cron: '0 16 * * 1-5'
-
-    # Monday-Friday 10 AM PT = 5 PM UTC (17:00)
-    - cron: '0 17 * * 1-5'
-
-    # Monday-Friday 11 AM PT = 6 PM UTC (18:00)
-    - cron: '0 18 * * 1-5'
-
-    # Monday-Friday 12 PM PT = 7 PM UTC (19:00)
-    - cron: '0 19 * * 1-5'
-
-    # Monday-Friday 1 PM PT = 8 PM UTC (20:00)
-    - cron: '0 20 * * 1-5'
-
-    # Monday-Friday 2 PM PT = 9 PM UTC (21:00)
-    - cron: '0 21 * * 1-5'
-
-  workflow_dispatch:  # Allows manual triggering
+  workflow_dispatch:
     inputs:
       reseed_baselines:
         description: 'One-shot: rewrite mtd_rates/ytd_rates from historical data (no message sent)'
