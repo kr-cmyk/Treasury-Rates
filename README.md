@@ -46,12 +46,12 @@ Add these two secrets:
 
 **Secret 1:**
 - Name: `GMAIL_ADDRESS`
-- Value: `kr@redduckcapital.com`
+- Value: `<YOUR_GMAIL_ADDRESS>`
 - Click "Add secret"
 
 **Secret 2:**
 - Name: `GMAIL_APP_PASSWORD`
-- Value: `zcmaudnvrhwvpgkp`
+- Value: `<YOUR_GMAIL_APP_PASSWORD>`
 - Click "Add secret"
 
 ### Step 4: Enable GitHub Actions
@@ -65,7 +65,7 @@ Add these two secrets:
 2. Click **"Markets Update Notifier"** workflow
 3. Click **"Run workflow"** → **"Run workflow"**
 4. Wait 30-60 seconds
-5. Check your email at kr@redduckcapital.com!
+5. Check your email!
 
 ## ✅ You're Done!
 
